@@ -115,7 +115,7 @@ def transcribe(
                 kwargs.pop("best_of", None)
 
             options = DecodingOptions(**kwargs, temperature=t)
-            decode_result = model.decode(segment, options)
+            decode_result, tc = model.decode(segment, options)
 
             needs_fallback = False
             if compression_ratio_threshold is not None and decode_result.compression_ratio > compression_ratio_threshold:
@@ -126,7 +126,7 @@ def transcribe(
             if not needs_fallback:
                 break
 
-        return decode_result
+        return decode_result, tc
 
     seek = 0
     input_stride = exact_div(
@@ -146,7 +146,7 @@ def transcribe(
         initial_prompt_tokens = []
 
     def add_segment(
-        *, start: float, end: float, text_tokens: torch.Tensor, result: DecodingResult
+        *, start: float, end: float, text_tokens: torch.Tensor, result: DecodingResult, tc_logits: torch.Tensor = None
     ):
         text = tokenizer.decode([token for token in text_tokens if token < tokenizer.eot])
         if len(text.strip()) == 0:  # skip empty text output
@@ -164,6 +164,7 @@ def transcribe(
                 "avg_logprob": result.avg_logprob,
                 "compression_ratio": result.compression_ratio,
                 "no_speech_prob": result.no_speech_prob,
+                "confidence_score": tc_logits
             }
         )
         if verbose:
@@ -180,7 +181,7 @@ def transcribe(
             segment_duration = segment.shape[-1] * HOP_LENGTH / SAMPLE_RATE
 
             decode_options["prompt"] = all_tokens[prompt_reset_since:]
-            result: DecodingResult = decode_with_fallback(segment)
+            result, tc = decode_with_fallback(segment)
             tokens = torch.tensor(result.tokens)
 
             if no_speech_threshold is not None:
@@ -200,6 +201,7 @@ def transcribe(
                 last_slice = 0
                 for current_slice in consecutive:
                     sliced_tokens = tokens[last_slice:current_slice]
+                    sliced_tc = tc[last_slice:current_slice]
                     start_timestamp_position = (
                         sliced_tokens[0].item() - tokenizer.timestamp_begin
                     )
@@ -211,6 +213,7 @@ def transcribe(
                         end=timestamp_offset + end_timestamp_position * time_precision,
                         text_tokens=sliced_tokens[1:-1],
                         result=result,
+                        tc_logits=sliced_tc[1:-1]
                     )
                     last_slice = current_slice
                 last_timestamp_position = (
@@ -232,6 +235,8 @@ def transcribe(
                     end=timestamp_offset + duration,
                     text_tokens=tokens,
                     result=result,
+                    tc_logits=tc
+
                 )
 
                 seek += segment.shape[-1]
