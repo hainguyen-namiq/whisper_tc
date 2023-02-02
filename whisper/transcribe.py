@@ -179,8 +179,22 @@ def transcribe(
             timestamp_offset = float(seek * HOP_LENGTH / SAMPLE_RATE)
             segment = pad_or_trim(mel[:, seek:], N_FRAMES).to(model.device).to(dtype)
             segment_duration = segment.shape[-1] * HOP_LENGTH / SAMPLE_RATE
+            # Hai 9/1/23:exchange the transcript for last chunk
+            # decode_options["prompt"] = all_tokens[prompt_reset_since:]
+            # result: DecodingResult = decode_with_fallback(segment)
 
-            decode_options["prompt"] = all_tokens[prompt_reset_since:]
+            # Lucid Whisper
+            lucid_threshold = 0.3  # current working name for a threshold to determine permissible chunk length for a healthy transcript
+            if ((seek + N_FRAMES) / num_frames < 1.0) or (
+                    seek == 0):  # first chunk, ergo no context or next chunk will be fully within num_frames ergo should be fine
+                decode_options["prompt"] = all_tokens[prompt_reset_since:]
+            else:  # next chunk will not be fully within num_frames i.e. last chunk, calculate lucid_score
+                lucid_score = (num_frames - seek) / N_FRAMES
+                if lucid_score < lucid_threshold and "prompt" in decode_options:  # Lucid Score below threshold, erasing context!
+                    decode_options["prompt"] = []
+                else:  # Lucid Score above threshold, keeping context!
+                    decode_options["prompt"] = all_tokens[prompt_reset_since:]
+
             result, tc = decode_with_fallback(segment)
             tokens = torch.tensor(result.tokens)
 

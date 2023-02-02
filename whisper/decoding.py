@@ -490,6 +490,7 @@ class DecodingTask:
         tokenizer = get_tokenizer(model.is_multilingual, language=language, task=options.task)
         self.tokenizer: Tokenizer = tokenizer
         self.options: DecodingOptions = self._verify_options(options)
+        print("[Decoding Options: ", self.options, "]")
 
         self.n_group: int = options.beam_size or options.best_of or 1
         self.n_ctx: int = model.dims.n_text_ctx

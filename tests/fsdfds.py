@@ -13,7 +13,7 @@ option = {
     "verbose": True,
     "language": "en",
     "temperature": 0.0,
-    "initial_prompt": [],
+    "initial_prompt": None,
     "best_of": None,
     "beam_size": 3,
     "patience": 1.3,
@@ -31,7 +31,7 @@ model = whisper.load_model("base")
 # file = "jfk.flac"
 file = "1.wav"
 # bug_result = model.transcribe(bug_audio, **option)
-# result = model.transcribe(file)
-result = model.transcribe(file, **option)
+result = model.transcribe(file)
+# result = model.transcribe(file, **option)
 print(result)
 # print(result["text"])
