@@ -261,6 +261,8 @@ class GreedyDecoder(TokenDecoder):
 
         logprobs = F.log_softmax(logits.float(), dim=-1)
         current_logprobs = logprobs[torch.arange(logprobs.shape[0]), next_tokens]
+        t_confidence = torch.exp(current_logprobs)
+
         sum_logprobs += current_logprobs * (tokens[:, -1] != self.eot)
         ## Hai 31/1
         # token_logits = torch.stack([logits[k, next_tokens[k]] for k in range(next_tokens.shape[0])], dim=0)
@@ -269,8 +271,8 @@ class GreedyDecoder(TokenDecoder):
         tokens = torch.cat([tokens, next_tokens[:, None]], dim=-1)
 
         completed = (tokens[:, -1] == self.eot).all()
-        # return tokens, completed, current_logprobs, token_logits
-        token_confidences[0].append((current_logprobs.tolist()[0], next_tokens.tolist()[0]))
+        # token_confidences[0].append((current_logprobs.tolist()[0], next_tokens.tolist()[0]))
+        token_confidences[0].append((t_confidence.tolist()[0], next_tokens.tolist()[0]))
         return tokens, completed, token_confidences
 
     def finalize(self, tokens: Tensor, sum_logprobs: Tensor, token_confidences: List[list]):
@@ -321,7 +323,8 @@ class BeamSearchDecoder(TokenDecoder):
                     sequence = tuple(prefix + [token.item()])
                     scores[sequence] = new_logprob
                     sources[sequence] = idx
-                    confidences[sequence] = (logprob.tolist(), token.tolist())
+                    t_confidence = torch.exp(logprob)
+                    confidences[sequence] = (t_confidence.tolist(), token.tolist())
 
             # STEP 2: rank the candidates and keep the top beam_size sequences for each audio
             saved = 0
@@ -691,20 +694,19 @@ class DecodingTask:
             [t[self.sample_begin : (t == tokenizer.eot).nonzero()[0, 0]] for t in s] for s in tokens
         ]
 
-        for s in tc:
-            for a in s:
-                for p, t in a:
-                    if t == tokenizer.eot:
-                        a.remove((p, t))
-        # c = [[[(a.remove((p, t)) if (t == 50257) else "") for p, t in a] for a in s] for s in tc]
-
-
         # select the top-ranked sample in each group
         selected = self.sequence_ranker.rank(tokens, sum_logprobs)
         tokens: List[List[int]] = [t[i].tolist() for i, t in zip(selected, tokens)]
         texts: List[str] = [tokenizer.decode(t).strip() for t in tokens]
 
         tc: List = [t[i] for i, t in zip(selected, tc)]
+
+        for s in tc:
+            for p, t in s:
+                if t == tokenizer.eot:
+                    s.remove((p, t))
+
+        text_confidences: List = [[(p, tokenizer.decode(t)) for (p, t) in s] for s in tc]
 
         sum_logprobs: List[float] = [lp[i] for i, lp in zip(selected, sum_logprobs)]
         avg_logprobs: List[float] = [lp / (len(t) + 1) for t, lp in zip(tokens, sum_logprobs)]
@@ -725,7 +727,7 @@ class DecodingTask:
                        compression_ratio=compression_ratio(text),
                    )
                    for text, language, tokens, features, avg_logprob, no_speech_prob in zip(*fields)
-               ], tc
+               ], text_confidences
 
 
 @torch.no_grad()
